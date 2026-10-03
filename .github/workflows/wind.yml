@@ -1,0 +1,51 @@
+name: Publish GFS wind
+
+on:
+  schedule:
+    # Four GFS cycles daily; offset from the hour to reduce scheduler contention.
+    - cron: '17 4,10,16,22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kilat-wind-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.WIND_PUBLISH_ENABLED == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check wind source and time invariants
+        run: python -m unittest discover -s backend/test -p 'test_wind_contract.py'
+      - name: Install GRIB decoder
+        run: python -m pip install -r backend/scripts/wind-requirements.txt
+      - name: Build complete, unexpired wind document
+        run: python backend/scripts/build-wind.py --output wind-public/latest.json
+      - name: Verify consumer contract before publication
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'backend/scripts')
+          from wind_contract import parse_model
+          result = parse_model(Path('wind-public/latest.json').read_bytes())
+          if result.status != 'available':
+              raise SystemExit(result.reason)
+          if dt.datetime.now(dt.timezone.utc) >= result.data.expires_at:
+              raise SystemExit('Wind publication expired before deployment')
+          print('Consumer contract verified; dated wind document ready')
+          PY
+      - name: Publish static document
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.145.0 pages deploy wind-public --project-name kilat-wind --branch main
