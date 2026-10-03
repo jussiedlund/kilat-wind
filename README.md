@@ -2,7 +2,7 @@
 
 A scheduled NOAA GFS exporter for regional wind. It validates a complete, dated vector grid and publishes one static JSON document to Cloudflare Pages.
 
-**Hosted file:** [latest.json](https://kilat-wind.pages.dev/latest.json). The first manual CLI publication was checked on 3 October 2026. Automatic publishing stays disabled until the deployment credential is configured and the workflow is verified.
+**Hosted file:** [latest.json](https://kilat-wind.pages.dev/latest.json). Publishing is enabled. Manual workflow [37101817627](https://github.com/jussiedlund/kilat-wind/actions/runs/37101817627) passed on 3 October 2026, including the hosted-byte comparison. A successful scheduled event has not yet been observed; activation verification remains open.
 
 ## Data contract
 

@@ -4,8 +4,6 @@ on:
   schedule:
     # Four GFS cycles daily; offset from the hour to reduce scheduler contention.
     - cron: '17 4,10,16,22 * * *'
-    # Temporary activation check; remove after the first verified scheduled publication.
-    - cron: '8 6 3 10 *'
   workflow_dispatch:
 
 permissions:
