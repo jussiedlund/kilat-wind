@@ -1,23 +1,37 @@
-# Wind publisher: setup to review
+# Kilat wind publisher
 
-3 October 2026. Prepared, not published. Decision 037 requires a verified free publisher before iOS wind integration.
+A scheduled NOAA GFS exporter for regional wind. It validates a complete, dated vector grid and publishes one static JSON document to Cloudflare Pages.
 
-## What it does
+**Hosted file:** [latest.json](https://kilat-wind.pages.dev/latest.json). The first manual CLI publication was checked on 3 October 2026. Automatic publishing stays disabled until the deployment credential is configured and the workflow is verified.
 
-A small automatic job downloads NOAA's regional wind four times a day, checks the complete dated grid and puts one JSON file on free Cloudflare Pages hosting. Kilat reads that file. If a download fails, the existing publication remains; its expiry prevents old wind from being presented as current.
+## Data contract
 
-Local NEA wind is a separate observation source. This publisher does not provide NEA history or make a new time scale.
+- NOAA GFS 10 m wind: 0.25 degree grid, 95–120 degrees E and 8 degrees S–12 degrees N, 101 x 81 cells.
+- One model cycle with +0 / +3 / +6 / +9 / +12 hour frames; rows run south to north.
+- U points east; V points north. Components are base64 little-endian signed 16-bit integers, divided by 10 to obtain m/s.
+- Model-run, frame-valid, generation and expiry times are distinct. Consumers check expiry against the actual clock, including for past frames.
+- Failed downloads or contract checks preserve the previous publication; its expiry still applies.
+- This is modelled wind, not station observations or proof of smoke transport. One cycle does not provide a complete historical archive.
 
-## Recommended setup
+The public NEA fixture checks station/time pairing and partial coverage. This publisher does not provide NEA wind or history. NEA direction stays raw degrees pending official confirmation of its orientation convention.
 
-Create a separate **public GitHub repository named `kilat-wind`**, containing only the wind exporter, contract checks, tests, public NEA test data, dependency list, scheduled workflow and hosting headers. The application source and the rest of this project are outside that publication package.
+## Run locally
 
-Public repository code is visible to anyone. Standard GitHub runners are free for public repositories ([GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)). The existing four daily Pages deployments use about 120 of the Free plan's 500 monthly builds ([Pages limits](https://developers.cloudflare.com/pages/platform/limits/)). A private repository is possible, but its shared runner allowance and $0 spending stop must be checked before enabling it.
+Use Python 3.12 or later, preferably in a virtual environment:
 
-The Pages deployment credential goes into GitHub secret storage, not the repository or chat. The workflow remains disabled until configuration is complete. The package uses the existing `kilat-wind` Pages project name.
+    python -m pip install -r backend/scripts/wind-requirements.txt
+    python -m unittest discover -s backend/test -p 'test_wind_contract.py'
+    python backend/scripts/build-wind.py --output wind-public/latest.json
 
-## Activation and acceptance
+Generated documents are deployed separately. Commit only publisher source and tests.
 
-After the owner authorizes this concrete setup: create/connect the wind-only repository and free Pages project; configure the scoped deployment credential directly in secret storage; then enable the job. Verify the hosted file's contents and dates after a manual run and one later scheduled run. Only then proceed with the app integration and running interaction checks.
+## Activate
 
-Local data checks establish compatibility and mechanics. They do not establish scheduled reliability, wind accuracy or acceptance of the app's feel. NEA's exact direction convention still needs source confirmation before rendering its flow.
+Create the static Pages project `kilat-wind` before enabling deployment. Configure these repository secrets:
+
+- `CLOUDFLARE_ACCOUNT_ID`: hosting account ID.
+- `CLOUDFLARE_API_TOKEN`: Cloudflare Pages Edit token restricted to the hosting account.
+
+Set repository variable `WIND_PUBLISH_ENABLED` to `1`, then manually run **Publish GFS wind**. Check the hosted JSON and dates after that run and one later scheduled run. Production cadence is 04:17 / 10:17 / 16:17 / 22:17 UTC; scheduled starts can be delayed.
+
+Standard public GitHub runners and static Pages hosting support the zero-cost design. Four daily deployments use about 120 builds monthly. See [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions) and [Pages limits](https://developers.cloudflare.com/pages/platform/limits/).
