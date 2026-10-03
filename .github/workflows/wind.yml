@@ -53,7 +53,15 @@ jobs:
         run: npx --yes wrangler@4.145.0 pages deploy wind-public --project-name kilat-wind --branch main
       - name: Verify hosted publication
         run: |
-          curl --fail --silent --show-error --retry 3 --retry-delay 5 --retry-all-errors \
-            --output "$RUNNER_TEMP/wind-hosted.json" \
-            "https://kilat-wind.pages.dev/latest.json?publication=${GITHUB_RUN_ID}"
-          cmp wind-public/latest.json "$RUNNER_TEMP/wind-hosted.json"
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              --output "$RUNNER_TEMP/wind-hosted.json" \
+              "https://kilat-wind.pages.dev/latest.json?publication=${GITHUB_RUN_ID}-${attempt}" \
+              && cmp --silent wind-public/latest.json "$RUNNER_TEMP/wind-hosted.json"; then
+              echo 'Hosted wind publication matches the validated document'
+              exit 0
+            fi
+            if [ "$attempt" -lt 12 ]; then sleep 10; fi
+          done
+          echo 'Hosted wind did not match after bounded propagation checks' >&2
+          exit 1
