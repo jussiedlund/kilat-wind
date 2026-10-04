@@ -19,7 +19,8 @@ import urllib.request
 import eccodes as ec
 
 UTC = dt.timezone.utc
-HOURS = (0, 3, 6, 9, 12)
+HOURS = tuple(range(0, 49, 3))
+MAX_MODEL_AGE_HOURS = 24
 LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, STEP = -8.0, 12.0, 95.0, 120.0, 0.25
 WIDTH, HEIGHT = 101, 81
 MAX_GRIB_BYTES = 1_000_000
@@ -119,10 +120,10 @@ def document(files, now):
     if len(runs) != 1:
         raise ValueError("forecast hours span different model cycles")
     run = runs.pop()
-    expiry = run + dt.timedelta(hours=max(HOURS))
-    if run > now + dt.timedelta(minutes=5) or now >= expiry:
+    expiry = run + dt.timedelta(hours=MAX_MODEL_AGE_HOURS)
+    if run > now or now >= expiry:
         raise ValueError("model cycle is future-dated or has expired")
-    return {"schemaVersion": 1, "source": "NOAA/NCEP GFS 0.25 degree, 10 m wind",
+    return {"schemaVersion": 2, "source": "NOAA/NCEP GFS 0.25 degree, 10 m wind",
             "modelRunAt": iso(run), "generatedAt": iso(now), "expiresAt": iso(expiry),
             "grid": {"south": LAT_MIN, "north": LAT_MAX, "west": LON_MIN, "east": LON_MAX,
                      "stepDegrees": STEP, "width": WIDTH, "height": HEIGHT,
@@ -136,7 +137,7 @@ def latest_complete(now):
     candidate = candidate.replace(hour=(candidate.hour // 6) * 6, minute=0, second=0, microsecond=0)
     for offset in (0, 6):
         run = candidate - dt.timedelta(hours=offset)
-        if now >= run + dt.timedelta(hours=max(HOURS)):
+        if now >= run + dt.timedelta(hours=12):
             continue
         try:
             return document(fetch_cycle(run), now)
@@ -147,7 +148,7 @@ def latest_complete(now):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", action="append", metavar="HOUR=FILE", help="use a local GRIB file; repeat for 0,3,6,9,12")
+    parser.add_argument("--input", action="append", metavar="HOUR=FILE", help="use a local GRIB file; repeat for every 3-hour frame from 0 through 48")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     now = dt.datetime.now(UTC)
@@ -157,17 +158,37 @@ def main():
             hour_text, path = item.split("=", 1)
             hour = int(hour_text)
             if hour not in HOURS or hour in files:
-                parser.error("input forecast hours must be unique and among 0,3,6,9,12")
+                parser.error("input forecast hours must be unique, every 3 hours from 0 through 48")
             files[hour] = Path(path).read_bytes()
         result = document(files, now)
     else:
         result = latest_complete(now)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
+    # Keep schema1 on the old URL so already released clients keep working.
+    # The new app uses latest-v2.json; expiry is model age, not forecast horizon.
+    legacy = legacy_document(result)
+    if now >= dt.datetime.fromisoformat(legacy["expiresAt"].replace("Z", "+00:00")):
+        raise ValueError("cycle exceeds legacy 12-hour publication lifetime; retain both previous documents")
+    extended_output = args.output.with_name(args.output.stem + "-v2" + args.output.suffix)
+    write_document(extended_output, result)
+    write_document(args.output, legacy)
+
+
+def legacy_document(result):
+    legacy = dict(result)
+    legacy["schemaVersion"] = 1
+    legacy["frames"] = result["frames"][:5]
+    run = dt.datetime.fromisoformat(result["modelRunAt"].replace("Z", "+00:00"))
+    legacy["expiresAt"] = iso(run + dt.timedelta(hours=12))
+    return legacy
+
+
+def write_document(output, result):
+    output.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(result, separators=(",", ":")).encode("utf-8")
-    temporary = args.output.with_suffix(args.output.suffix + ".tmp")
+    temporary = output.with_suffix(output.suffix + ".tmp")
     temporary.write_bytes(body)
-    os.replace(temporary, args.output)
-    print(f"wrote {args.output} ({len(body)} bytes), model {result['modelRunAt']}, expires {result['expiresAt']}")
+    os.replace(temporary, output)
+    print(f"wrote {output} ({len(body)} bytes), model {result['modelRunAt']}, expires {result['expiresAt']}")
 
 
 if __name__ == "__main__":

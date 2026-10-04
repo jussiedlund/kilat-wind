@@ -8,6 +8,8 @@ from pathlib import Path
 import struct
 import sys
 import unittest
+from unittest import mock
+import types
 
 SPEC = importlib.util.spec_from_file_location('wind_contract', Path(__file__).parents[1] / 'scripts/wind_contract.py')
 w = importlib.util.module_from_spec(SPEC)
@@ -29,18 +31,18 @@ def encoded(values):
     return base64.b64encode(struct.pack('<8181h', *values)).decode('ascii')
 
 
-def document():
+def document(schema=1):
     # Distinct signs and x/y gradients make orientation/endian errors observable.
-    return {'schemaVersion': 1, 'source': 'NOAA/NCEP GFS 0.25 degree, 10 m wind',
+    return {'schemaVersion': schema, 'source': 'NOAA/NCEP GFS 0.25 degree, 10 m wind',
             'modelRunAt': RUN, 'generatedAt': '2026-10-02T21:00:00Z',
-            'expiresAt': '2026-10-03T06:00:00Z',
+            'expiresAt': (w.instant(RUN) + dt.timedelta(hours=12 if schema == 1 else 24)).isoformat(),
             'encoding': w.ENCODING, 'grid': {'south': -8, 'north': 12, 'west': 95, 'east': 120,
                                             'stepDegrees': .25, 'width': 101, 'height': 81, 'order': w.ORDER},
             'frames': [{'forecastHour': hour,
                         'validAt': (w.instant(RUN) + dt.timedelta(hours=hour)).isoformat(),
                         'u': encoded([-500 + x + hour * 10 for y in range(81) for x in range(101)]),
                         'v': encoded([200 - y - hour * 10 for y in range(81) for x in range(101)])}
-                       for hour in (0, 3, 6, 9, 12)]}
+                       for hour in (w.HOURS if schema == 1 else w.EXTENDED_HOURS)]}
 
 
 class StationContract(unittest.TestCase):
@@ -183,6 +185,34 @@ class ModelContract(unittest.TestCase):
         self.assertEqual(self.sample('2026-10-02T18:00:00').status, 'invalid')
         self.assertEqual(self.sample(latitude=float('nan')).status, 'invalid')
 
+    def test_extended_cycle_keeps_real_now_and_forecast_near_age_limit(self):
+        raw = document(schema=2)
+        parsed = w.parse_model(raw)
+        self.assertEqual(parsed.status, 'available')
+        model = parsed.data
+        clock = w.instant(RUN) + dt.timedelta(hours=24, seconds=-1)
+        # Next day's forecast midpoint is supported even near the age deadline.
+        target = w.instant(RUN) + dt.timedelta(hours=45, minutes=30)
+        sample = w.sample_model(model, target, -8, 95, now=clock)
+        self.assertEqual(sample.status, 'available')
+        self.assertAlmostEqual(sample.data.u_ms, -4.5)
+        self.assertAlmostEqual(sample.data.v_ms, -25.5)
+        self.assertEqual(sample.data.valid_from, w.instant(RUN) + dt.timedelta(hours=45))
+        self.assertEqual(sample.data.valid_to, w.instant(RUN) + dt.timedelta(hours=48))
+        self.assertEqual(w.sample_model(model, clock, -8, 95, now=clock).status, 'available')
+        self.assertEqual(w.sample_model(model, RUN, -8, 95, now=model.expires_at).status, 'expired')
+        self.assertEqual(w.sample_model(model, model.frames[-1].valid_at, -8, 95, now=clock).status, 'available')
+        self.assertEqual(w.sample_model(model, model.frames[-1].valid_at + dt.timedelta(seconds=1), -8, 95, now=clock).status, 'unsupported')
+
+    def test_extended_expiry_and_complete_forecast_sequence_are_independent(self):
+        for mutation in (lambda r: r.update(expiresAt=r['frames'][-1]['validAt']),
+                         lambda r: r['frames'].pop(),
+                         lambda r: r['frames'][9].update(forecastHour=26),
+                         lambda r: r.update(schemaVersion=3)):
+            raw = document(schema=2)
+            mutation(raw)
+            self.assertEqual(w.parse_model(raw).status, 'invalid')
+
     def test_invalid_grid_encoding_and_times(self):
         mutations = [lambda r: r['grid'].update(width=100),
                      lambda r: r['grid'].update(width=101.0),
@@ -208,6 +238,46 @@ class ModelContract(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 self.assertEqual(w.parse_model(raw).status, 'invalid')
         self.assertEqual(w.parse_model(' ' * (w.MAX_BYTES + 1)).status, 'invalid')
+
+
+class ProducerContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('build_wind', Path(__file__).parents[1] / 'scripts/build-wind.py')
+        cls.producer = importlib.util.module_from_spec(spec)
+        # GRIB decoding is covered by live-source validation; these checks exercise
+        # publication boundaries without requiring an ecCodes install or network.
+        with mock.patch.dict(sys.modules, {'eccodes': types.ModuleType('eccodes')}):
+            spec.loader.exec_module(cls.producer)
+
+    def test_producer_dual_documents_match_both_consumer_contracts(self):
+        raw = document(schema=2)
+        frames = {row['forecastHour']: row for row in raw['frames']}
+        def decode(data, hour):
+            return w.instant(RUN), frames[hour]
+        with mock.patch.object(self.producer, 'decode_grib', side_effect=decode):
+            produced = self.producer.document({hour: b'GRIB' for hour in frames}, w.instant(NOW))
+            legacy = self.producer.legacy_document(produced)
+            self.assertEqual(w.parse_model(produced).status, 'available')
+            self.assertEqual(w.parse_model(legacy).status, 'available')
+            self.assertEqual(len(produced['frames']), 17)
+            self.assertEqual(len(legacy['frames']), 5)
+            self.assertNotEqual(produced['expiresAt'], produced['frames'][-1]['validAt'])
+            with self.assertRaisesRegex(ValueError, 'expired'):
+                self.producer.document({hour: b'GRIB' for hour in frames}, w.instant(RUN) + dt.timedelta(hours=24))
+            with self.assertRaisesRegex(ValueError, 'missing forecast hour 48'):
+                self.producer.document({hour: b'GRIB' for hour in frames if hour != 48}, w.instant(NOW))
+
+    def test_cycle_fallback_never_publishes_expired_legacy_document(self):
+        clock = w.instant('2026-10-03T08:00:00Z')
+        requested = []
+        def unavailable(run):
+            requested.append(run)
+            raise OSError('source unavailable')
+        with mock.patch.object(self.producer, 'fetch_cycle', side_effect=unavailable):
+            with self.assertRaises(RuntimeError):
+                self.producer.latest_complete(clock)
+        self.assertEqual(requested, [w.instant('2026-10-03T00:00:00Z')])
 
 
 if __name__ == '__main__':

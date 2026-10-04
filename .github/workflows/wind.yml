@@ -37,12 +37,13 @@ jobs:
           import sys
           sys.path.insert(0, 'backend/scripts')
           from wind_contract import parse_model
-          result = parse_model(Path('wind-public/latest.json').read_bytes())
-          if result.status != 'available':
-              raise SystemExit(result.reason)
-          if dt.datetime.now(dt.timezone.utc) >= result.data.expires_at:
-              raise SystemExit('Wind publication expired before deployment')
-          print('Consumer contract verified; dated wind document ready')
+          for name in ('latest.json', 'latest-v2.json'):
+              result = parse_model(Path('wind-public', name).read_bytes())
+              if result.status != 'available':
+                  raise SystemExit(result.reason)
+              if dt.datetime.now(dt.timezone.utc) >= result.data.expires_at:
+                  raise SystemExit(f'{name}: wind publication expired before deployment')
+          print('Both consumer contracts verified; dated wind documents ready')
           PY
       - name: Publish static document
         env:
@@ -51,15 +52,21 @@ jobs:
         run: npx --yes wrangler@4.145.0 pages deploy wind-public --project-name kilat-wind --branch main
       - name: Verify hosted publication
         run: |
+          for name in latest.json latest-v2.json; do
+          matched=0
           for attempt in {1..12}; do
             if curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
               --output "$RUNNER_TEMP/wind-hosted.json" \
-              "https://kilat-wind.pages.dev/latest.json?publication=${GITHUB_RUN_ID}-${attempt}" \
-              && cmp --silent wind-public/latest.json "$RUNNER_TEMP/wind-hosted.json"; then
-              echo 'Hosted wind publication matches the validated document'
-              exit 0
+              "https://kilat-wind.pages.dev/${name}?publication=${GITHUB_RUN_ID}-${attempt}" \
+              && cmp --silent "wind-public/${name}" "$RUNNER_TEMP/wind-hosted.json"; then
+              echo "Hosted ${name} matches the validated document"
+              matched=1
+              break
             fi
             if [ "$attempt" -lt 12 ]; then sleep 10; fi
           done
-          echo 'Hosted wind did not match after bounded propagation checks' >&2
-          exit 1
+          if [ "$matched" -ne 1 ]; then
+            echo "Hosted ${name} did not match after bounded propagation checks" >&2
+            exit 1
+          fi
+          done

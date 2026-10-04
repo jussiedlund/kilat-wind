@@ -1,7 +1,7 @@
 """Off-app wind contract; no fetching, publishing, rendering or source blending.
 
 NEA directions stay raw degrees: a direction-from convention is not asserted here.
-GFS u/v are eastward/northward m/s as supplied by the schema1 producer.
+GFS u/v are eastward/northward m/s as supplied by the producer.
 All query instants require timezone-aware full ISO dates. Bounds are defensive
 contract limits, not claims about station sensor range or source freshness.
 """
@@ -21,7 +21,9 @@ MAX_ROWS = 2000
 MAX_VALUES = 100_000
 ORDER = 'south-to-north rows, west-to-east columns'
 ENCODING = 'base64 of little-endian signed int16; divide by 10 for m/s'
-HOURS = (0, 3, 6, 9, 12)
+HOURS = (0, 3, 6, 9, 12)  # Legacy schema1.
+EXTENDED_HOURS = tuple(range(0, 49, 3))
+MAX_MODEL_AGE_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -234,10 +236,10 @@ def sample_observations(observations, target_at, *, max_age_seconds):
 
 
 def parse_model(payload):
-    """Validate exactly the existing build-wind.py schema1 product, fail closed."""
+    """Validate legacy schema1 or extended schema2 products, fail closed."""
     try:
         raw = load_payload(payload)
-        if type(raw.get('schemaVersion')) is not int or raw['schemaVersion'] != 1 or raw.get('encoding') != ENCODING:
+        if type(raw.get('schemaVersion')) is not int or raw['schemaVersion'] not in (1, 2) or raw.get('encoding') != ENCODING:
             raise ValueError('unsupported schema or encoding')
         if raw.get('source') != 'NOAA/NCEP GFS 0.25 degree, 10 m wind':
             raise ValueError('unsupported model source')
@@ -251,10 +253,12 @@ def parse_model(payload):
         run, generated, expiry = (instant(raw[k]) for k in ('modelRunAt', 'generatedAt', 'expiresAt'))
         if run.minute or run.second or run.microsecond or run.hour % 6:
             raise ValueError('unsupported model cycle')
-        if not run <= generated < expiry or expiry != run + dt.timedelta(hours=12):
+        hours = HOURS if raw['schemaVersion'] == 1 else EXTENDED_HOURS
+        lifetime = 12 if raw['schemaVersion'] == 1 else MAX_MODEL_AGE_HOURS
+        if not run <= generated < expiry or expiry != run + dt.timedelta(hours=lifetime):
             raise ValueError('invalid publication times')
         frames = []
-        for hour, frame in zip(HOURS, bounded_list(raw.get('frames'), len(HOURS))):
+        for hour, frame in zip(hours, bounded_list(raw.get('frames'), len(hours))):
             if not isinstance(frame, dict) or type(frame.get('forecastHour')) is not int or frame['forecastHour'] != hour:
                 raise ValueError('invalid frame sequence')
             valid = instant(frame['validAt'])
@@ -273,7 +277,7 @@ def parse_model(payload):
                     raise ValueError('out of bounds wind component')
                 components.append(tuple(value / 10 for value in values))
             frames.append(Frame(valid, *components))
-        if len(frames) != len(HOURS):
+        if len(frames) != len(hours):
             raise ValueError('incomplete frame sequence')
         return Result('available', Model(raw['source'], run, generated, expiry, tuple(frames)))
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as error:

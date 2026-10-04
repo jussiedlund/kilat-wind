@@ -1,3 +1,7 @@
 /latest.json
   Cache-Control: public, max-age=300
   X-Content-Type-Options: nosniff
+
+/latest-v2.json
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff
