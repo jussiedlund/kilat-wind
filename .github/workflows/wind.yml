@@ -4,6 +4,8 @@ on:
   schedule:
     # Four GFS cycles daily; offset from the hour to reduce scheduler contention.
     - cron: '17 4,10,16,22 * * *'
+    # Reuse this established schedule for hourly regional publication as well.
+    - cron: '37 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -14,8 +16,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  regional:
+    uses: ./.github/workflows/regional.yml
+    secrets: inherit
+
   publish:
-    if: vars.WIND_PUBLISH_ENABLED == '1'
+    if: vars.WIND_PUBLISH_ENABLED == '1' && (github.event_name != 'schedule' || github.event.schedule == '17 4,10,16,22 * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:

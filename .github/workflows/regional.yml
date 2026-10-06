@@ -5,6 +5,7 @@ on:
     # Hourly retries leave room for delayed/dropped GitHub schedules before the app's 4h freshness limit.
     - cron: '23 * * * *'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
