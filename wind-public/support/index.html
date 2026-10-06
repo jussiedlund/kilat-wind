@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kilat support</title>
+<style>
+:root { color-scheme: light dark; --bg: #fff; --fg: #1c1c1e; --muted: #6c6c70; --link: #0a66c2; }
+@media (prefers-color-scheme: dark) { :root { --bg: #000; --fg: #f2f2f7; --muted: #a1a1a6; --link: #5ab0ff; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+h1 { font-size: 28px; margin: 0 0 4px; }
+h2 { font-size: 19px; margin: 32px 0 8px; }
+p.meta { color: var(--muted); margin: 0 0 24px; }
+a { color: var(--link); }
+ul { padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Kilat support</h1>
+<p class="meta">Weather and air quality in Singapore, on one map.</p>
+
+<p>Found a bug, a wrong reading or have an idea? Email <a href="mailto:jussi.edlund@gmail.com">jussi.edlund@gmail.com</a>. If you can, include your iPhone model, iOS version, and roughly when and where you were looking.</p>
+
+<h2>Common questions</h2>
+<p><strong>Where does the data come from?</strong> Singapore's National Environment Agency (NEA) via data.gov.sg and haze.gov.sg. Regional air readings come from Malaysia's Department of Environment and Indonesia's environment ministry and BMKG. Fire hotspots are NASA FIRMS satellite detections, and model wind is NOAA GFS. Kilat is independent and not affiliated with any of these agencies.</p>
+<p><strong>Why does a reading say "Updated" or show as missing?</strong> NEA publishes most readings a few minutes after they are measured, and sometimes skips an hour. Kilat shows the time of each reading and never fills a gap with an estimate.</p>
+<p><strong>What is the US AQI in Kilat?</strong> An estimate from NEA's hourly PM2.5 using the US EPA breakpoints. It is not an official NEA index.</p>
+<p><strong>Does Kilat track me?</strong> No. See the <a href="/privacy/">privacy policy</a>.</p>
+</main>
+</body>
+</html>
