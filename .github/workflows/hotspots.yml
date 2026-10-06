@@ -2,8 +2,8 @@ name: Collect fire hotspot counts
 
 on:
   schedule:
-    # Daily, after the previous UTC day has filled in the FIRMS 7-day file; the 7-day window covers missed runs.
-    - cron: '43 2 * * *'
+    # Repeat through the day so a dropped schedule is recovered by the next run.
+    - cron: '43 2,8,14,20 * * *'
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,7 @@ jobs:
           cat "$RUNNER_TEMP/hotspots.sql"
           rows=$(grep -c '^REPLACE INTO hotspot_recent' "$RUNNER_TEMP/hotspots.sql" || true)
           if [ "$rows" -lt 3 ]; then echo "Only $rows complete days in the FIRMS file; not writing" >&2; exit 1; fi
+          cat backend/scripts/publish-hotspot-counts.sql >> "$RUNNER_TEMP/hotspots.sql"
       - name: Write counts to D1
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
