@@ -1,0 +1,39 @@
+name: Publish haze briefing
+
+on:
+  schedule:
+    # Offset from the hour so the 23 past regional publication and NEA's hourly readings have landed.
+    - cron: '40 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kilat-haze-briefing
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.HAZE_BRIEFING_ENABLED == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install briefing dependencies
+        run: python -m pip install -r backend/briefing/requirements.txt
+      - name: Check briefing validators and publisher
+        run: python -m unittest discover -s backend/test -p 'test_haze_briefing.py'
+      - name: Collect, brief and validate
+        # A skipped, rejected or failed briefing still yields a row (shadow-review data); only a crash fails here.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python backend/briefing/publish.py --output "$RUNNER_TEMP/haze-briefing.sql"
+      - name: Publish briefing row
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4.145.0 d1 execute sg-map-lens-data --remote --file "$RUNNER_TEMP/haze-briefing.sql" --yes

@@ -1,0 +1,71 @@
+{
+ "collectedAt": "2026-10-08T03:14:17.796006+00:00",
+ "place": {
+  "name": "Keppel Bay",
+  "lat": 1.2645,
+  "lon": 103.821,
+  "region": "south"
+ },
+ "sources": {
+  "pm25_today": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "pm25_yesterday": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "psi_today": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "psi_yesterday": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "snapshot": {
+   "status": "ok",
+   "seconds": 0.4
+  },
+  "haze_outlook": {
+   "status": "ok",
+   "seconds": 0.4
+  },
+  "regional": {
+   "status": "ok",
+   "seconds": 0.2
+  },
+  "regional_history": {
+   "status": "ok",
+   "seconds": 0.6
+  },
+  "regional_air": {
+   "status": "ok",
+   "seconds": 0.3
+  },
+  "regional_air_history": {
+   "status": "ok",
+   "seconds": 0.2
+  },
+  "wind_speed": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "wind_direction": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "forecast_24h": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "forecast_2h": {
+   "status": "ok",
+   "seconds": 2.1
+  },
+  "gfs_wind": {
+   "status": "ok",
+   "seconds": 0.2
+  }
+ }
+}

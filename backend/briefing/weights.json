@@ -1,0 +1,76 @@
+{
+ "_note": "Signals that decide what the briefing leads with. kind 'change' = something new this hour; kind 'condition' = the standing situation. A change scoring at least lead_threshold leads the briefing; otherwise it leads with the top condition. Score = weight x strength (graded signals 1-2). Tests live in digest.py (signals).",
+ "lead_threshold": 3,
+ "outlook_new": {
+  "weight": 4.5,
+  "within_hours": 3,
+  "why": "NEA just published; people look for it, so it should lead unless something bigger happened",
+  "kind": "change"
+ },
+ "outlook_changed": {
+  "weight": 4,
+  "why": "NEA's forecast category moved since the previous snapshot",
+  "kind": "change"
+ },
+ "pm25_jump": {
+  "weight": 3,
+  "delta": 25,
+  "why": "1-hr PM2.5 moved sharply within 3 h in a region",
+  "kind": "change"
+ },
+ "pm25_band_change": {
+  "weight": 3,
+  "why": "a region crossed an NEA 1-hr PM2.5 band within 3 h",
+  "kind": "change"
+ },
+ "psi_band_change": {
+  "weight": 4,
+  "why": "a region's 24-hr PSI crossed a band within 6 h",
+  "kind": "change"
+ },
+ "advice_change": {
+  "weight": 4,
+  "why": "the app's advisory level changed within 3 h in a region",
+  "kind": "change"
+ },
+ "regional_spread": {
+  "weight": 1.5,
+  "delta": 35,
+  "why": "regions differ enough that place matters",
+  "kind": "condition"
+ },
+ "haze_over_sg": {
+  "weight": 2,
+  "why": "a satellite haze outline covers Singapore",
+  "kind": "condition"
+ },
+ "dense_haze_near": {
+  "weight": 2,
+  "km": 300,
+  "why": "a dense haze outline is close",
+  "kind": "condition"
+ },
+ "fires_anomaly": {
+  "weight": 1.5,
+  "ratio": 5,
+  "why": "regional fire detections far above the 2019-2024 norm",
+  "kind": "condition"
+ },
+ "wind_from_fires": {
+  "weight": 2,
+  "share": 0.5,
+  "why": "modelled wind at a large fire area points toward Singapore most of the next 24 h",
+  "kind": "condition"
+ },
+ "rain_now": {
+  "weight": 2,
+  "why": "showers in the current 2-hour forecast can briefly clean the air",
+  "kind": "change"
+ },
+ "stale_data": {
+  "weight": 3,
+  "minutes": 100,
+  "why": "latest Singapore reading is too old to describe 'now'",
+  "kind": "change"
+ }
+}
