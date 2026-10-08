@@ -31,6 +31,8 @@ LIMITS = {'headline': 60, 'summary': 400, 'ahead': 220}  # over these: a warning
 HARD_LIMITS = {'headline': 90, 'summary': 650, 'ahead': 320}  # over these: something went wrong, reject
 ADVICE_RE = re.compile(r'\b(should|wear|stay (?:indoors|inside|home)|avoid|masks?|exercise|n95|close (?:your|the) windows)\b', re.I)
 CLEAR_RE = re.compile(r'\b(clear|clearer|clean|cleaner)\b', re.I)
+REGIONS = ('north', 'south', 'east', 'west', 'central')
+HERO_MAX = 24
 NUMBER_RE = re.compile(r'[0-9]+(?:\.[0-9]+)?')
 
 
@@ -105,6 +107,22 @@ def validate(text, stop_reason, digest_text):
             warnings.append(f'{key} is {len(value)} chars (target {limit})')
         for n in sorted(numbers(value) - known):
             reasons.append(f'{key} contains number {n} not in the digest')
+    # Hero lines are optional extras: a bad one is dropped with a warning and never rejects the card.
+    hero = card.get('hero')
+    if hero is not None:
+        kept = {}
+        if not isinstance(hero, dict):
+            warnings.append('hero is not an object; dropped')
+        else:
+            for region in REGIONS:
+                line = hero.get(region)
+                if not isinstance(line, str) or not line.strip():
+                    warnings.append(f'hero {region} missing')
+                elif len(line) > HERO_MAX or not 1 <= len(line.split()) <= 4 or re.search(r'[0-9]', line) or CLEAR_RE.search(line):
+                    warnings.append(f'hero {region} dropped: {line!r}')
+                else:
+                    kept[region] = line.strip().rstrip('.')
+        card['hero'] = kept or None
     lead = card.get('lead')
     lead_id = lead.strip().strip('[]') if isinstance(lead, str) else ''
     if not re.fullmatch(r'S[0-9]+', lead_id) or f'[{lead_id}]' not in digest_text:

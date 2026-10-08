@@ -83,6 +83,16 @@ class ValidatorTests(Base):
         _, reasons, _ = publish.validate(json.dumps(dict(GOOD, summary='Worse since 3pm.')), 'end_turn', '[S1] x 14:00 [S2]')
         self.assertTrue(any('number 15 ' in r for r in reasons))
 
+    def test_hero_lines_kept_or_dropped_with_warnings(self):
+        hero = {'north': 'Lighter haze for now', 'south': 'Haze picking up', 'east': 'Air is clear today',
+                'west': 'PM2.5 at 70', 'central': 'Smoky but easing slowly over here today'}
+        card, reasons, warnings = self.check(dict(GOOD, hero=hero))
+        self.assertEqual(reasons, [])
+        self.assertEqual(card['hero'], {'north': 'Lighter haze for now', 'south': 'Haze picking up'})
+        self.assertEqual(sum('dropped' in w for w in warnings), 3)
+        card, reasons, warnings = self.check(dict(GOOD, hero='nope'))
+        self.assertEqual((reasons, card['hero']), ([], None))
+
     def test_missing_key_rejected(self):
         bad = {k: v for k, v in GOOD.items() if k != 'ahead'}
         _, reasons, _ = self.check(bad)
