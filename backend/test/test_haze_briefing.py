@@ -62,9 +62,12 @@ class ValidatorTests(Base):
         self.assertEqual((reasons, warnings), ([], []))
         self.assertEqual(card['lead'], 'S1')
 
-    def test_long_headline_rejected(self):
-        _, reasons, _ = self.check(dict(GOOD, headline='x' * 61))
-        self.assertTrue(any('headline is 61' in r for r in reasons))
+    def test_long_headline_warns_then_rejects(self):
+        _, reasons, warnings = self.check(dict(GOOD, headline='x' * 61))
+        self.assertEqual(reasons, [])
+        self.assertTrue(any('headline is 61' in w for w in warnings))
+        _, reasons, _ = self.check(dict(GOOD, headline='x' * 91))
+        self.assertTrue(any('headline is 91' in r for r in reasons))
 
     def test_invented_number_rejected(self):
         _, reasons, _ = self.check(dict(GOOD, summary='PM2.5 hit 987 this morning.'))
