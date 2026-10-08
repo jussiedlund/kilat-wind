@@ -93,6 +93,11 @@ class ValidatorTests(Base):
         card, reasons, warnings = self.check(dict(GOOD, hero='nope'))
         self.assertEqual((reasons, card['hero']), ([], None))
 
+    def test_advice_variants_warn(self):
+        _, reasons, warnings = self.check(dict(GOOD, summary='The app advises avoiding strenuous outdoor activity.'))
+        self.assertEqual(reasons, [])
+        self.assertTrue(any('avoiding' in w for w in warnings) and any('advises' in w for w in warnings))
+
     def test_missing_key_rejected(self):
         bad = {k: v for k, v in GOOD.items() if k != 'ahead'}
         _, reasons, _ = self.check(bad)

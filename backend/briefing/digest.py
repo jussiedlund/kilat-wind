@@ -220,7 +220,7 @@ def advisory(raw, ctx):
     for region, (level, driver) in levels.items():
         groups.setdefault(level, []).append((region, driver))
     lines = [("Each reader sees the app's health advisory card for their own region right beside this briefing. "
-              "The briefing's advice must match these cards: give the strictest one, and say where it is lighter.", None)]
+              "It is context only: the summary must not repeat or paraphrase this advice, but must never contradict it.", None)]
     for level in sorted(groups, reverse=True):
         headline, rows = ADVICE[level]
         regions = ', '.join(r for r, _ in groups[level])
