@@ -62,6 +62,31 @@ class ValidatorTests(Base):
         self.assertEqual((reasons, warnings), ([], []))
         self.assertEqual(card['lead'], 'S1')
 
+    def test_points_accepted_and_joined_into_summary(self):
+        pts = ['PM2.5 is in the normal band across Singapore.', ' Haze is easing through the morning. ']
+        card, reasons, warnings = self.check(dict(GOOD, points=pts))
+        self.assertEqual((reasons, warnings), ([], []))
+        self.assertEqual(card['points'], [p.strip() for p in pts])
+        self.assertEqual(card['summary'], ' '.join(card['points']))
+
+    def test_single_point_rejected(self):
+        _, reasons, _ = self.check(dict(GOOD, points=['Only one point here.']))
+        self.assertIn('points must be 2-4 non-empty strings', reasons)
+
+    def test_point_with_invented_number_rejected(self):
+        _, reasons, _ = self.check(dict(GOOD, points=['Fine overall.', 'PM2.5 hit 987 this morning.']))
+        self.assertTrue(any('point 2 contains number 987' in r for r in reasons))
+        self.assertEqual(len(reasons), 1)
+
+    def test_long_point_warns_only(self):
+        _, reasons, warnings = self.check(dict(GOOD, points=['Fine overall.', 'word ' * 30]))
+        self.assertEqual(reasons, [])
+        self.assertTrue(any('point 2 is 149 chars (target 130)' in w for w in warnings))
+
+    def test_very_long_point_rejected(self):
+        _, reasons, _ = self.check(dict(GOOD, points=['Fine overall.', 'x' * 201]))
+        self.assertTrue(any('point 2 is 201 chars (hard limit 200)' in r for r in reasons))
+
     def test_long_headline_warns_then_rejects(self):
         _, reasons, warnings = self.check(dict(GOOD, headline='x' * 61))
         self.assertEqual(reasons, [])

@@ -29,6 +29,7 @@ MAX_READING_AGE = timedelta(minutes=120)
 KEEP_ROWS = 2000
 LIMITS = {'headline': 60, 'summary': 400, 'ahead': 220}  # over these: a warning, worth reviewing
 HARD_LIMITS = {'headline': 90, 'summary': 650, 'ahead': 320}  # over these: something went wrong, reject
+POINT_LIMIT, POINT_HARD_LIMIT = 130, 200  # per bullet in `points`
 ADVICE_RE = re.compile(r'\b(should|wear\w*|stay\w* (?:indoors|inside|home)|avoid\w*|reduc\w* (?:\w+ )?(?:outdoor|activity|exertion)|masks?|exercis\w*|n95|close (?:your|the) windows|advis\w*)\b', re.I)
 CLEAR_RE = re.compile(r'\b(clear|clearer|clean|cleaner)\b', re.I)
 REGIONS = ('north', 'south', 'east', 'west', 'central')
@@ -95,6 +96,23 @@ def validate(text, stop_reason, digest_text):
         return None, reasons, warnings
     known = numbers(digest_text)
     prose = []
+    has_points = 'points' in card
+    if has_points:
+        points = card['points']
+        if not isinstance(points, list) or not 2 <= len(points) <= 4 or not all(isinstance(p, str) and p.strip() for p in points):
+            reasons.append('points must be 2-4 non-empty strings')
+        else:
+            points = [p.strip() for p in points]
+            for i, point in enumerate(points, 1):
+                if len(point) > POINT_HARD_LIMIT:
+                    reasons.append(f'point {i} is {len(point)} chars (hard limit {POINT_HARD_LIMIT})')
+                elif len(point) > POINT_LIMIT:
+                    warnings.append(f'point {i} is {len(point)} chars (target {POINT_LIMIT})')
+                for n in sorted(numbers(point) - known):
+                    reasons.append(f'point {i} contains number {n} not in the digest')
+            # Keep `summary` populated so the length/advice/clear checks and older readers still work.
+            card['points'] = points
+            card['summary'] = ' '.join(points)
     for key, limit in LIMITS.items():
         value = card.get(key)
         if not isinstance(value, str) or not value.strip():
@@ -106,6 +124,8 @@ def validate(text, stop_reason, digest_text):
         elif len(value) > limit:
             warnings.append(f'{key} is {len(value)} chars (target {limit})')
         for n in sorted(numbers(value) - known):
+            if key == 'summary' and has_points:
+                break  # numbers already checked per point
             reasons.append(f'{key} contains number {n} not in the digest')
     # Hero lines are optional extras: a bad one is dropped with a warning and never rejects the card.
     hero = card.get('hero')
