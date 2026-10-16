@@ -19,27 +19,37 @@ ul { padding-left: 20px; }
 <body>
 <main>
 <h1>Kilat privacy policy</h1>
-<p class="meta">Effective 6 October 2026</p>
+<p class="meta">Effective 16 October 2026</p>
 
-<p>Kilat shows weather and air quality in Singapore. It has no accounts, no ads and no analytics, and it does not collect or sell personal data.</p>
+<p>Kilat shows weather and air quality in Singapore. It has no accounts, no ads and no analytics, and it never sells data. If you turn on alerts, Kilat stores the minimum needed to send them, described below; otherwise nothing about you leaves your device.</p>
 
 <h2>Your location</h2>
-<p>If you allow it, Kilat uses your location on your iPhone to choose the nearest weather stations and forecast area. Your location is not sent to us or stored on any server. Without location access, Kilat shows central Singapore.</p>
+<p>If you allow it, Kilat uses your location on your device to choose the nearest weather stations and forecast area. For this, your location is not sent anywhere. Without location access, Kilat shows central Singapore.</p>
 
-<h2>What leaves your iPhone</h2>
+<h2>Alerts</h2>
+<p>Alerts are off until you turn one on in Settings. While at least one alert is on, Kilat sends our data service:</p>
+<ul>
+<li>the push token Apple gives your device for Kilat, so we can deliver the alert</li>
+<li>the place alerts follow: either your location when you last opened Kilat (or the place you fixed with “This place”), rounded to about 1 km and kept only if it is inside Singapore, or, without location access, the Singapore region you chose</li>
+<li>your alert choices: which alerts are on, the lightning distance and whether stricter health advice is on</li>
+</ul>
+<p>We keep only the latest place and choices for each token. The token is not linked to your name, Apple Account or any other identity, and it is not used for tracking or advertising. The name of the place shown in Settings is looked up on your device and is not sent to us.</p>
+<p>The record is deleted when you turn off every alert, when Apple tells us the token is no longer valid (for example after you delete the app), or after 180 days without Kilat being opened. Alerts are delivered through Apple's push notification service.</p>
+
+<h2>What leaves your device</h2>
 <p>To show data, Kilat downloads public weather, air-quality and map information from these services:</p>
 <ul>
 <li>Singapore's National Environment Agency, through data.gov.sg</li>
 <li>Kilat's own data service (Cloudflare), which republishes public haze, hotspot, regional air and wind data</li>
 <li>Mapbox, for map tiles</li>
 </ul>
-<p>These requests do not include your location, name or any identifier from us. Like any internet request, they reveal your IP address and basic device information to the service that answers them, which handles it under its own privacy policy. Map requests show which area of the map you are viewing. Kilat turns off Mapbox's optional usage telemetry.</p>
+<p>Apart from the alert record above, these requests do not include your location, name or any identifier from us. Like any internet request, they reveal your IP address and basic device information to the service that answers them, which handles it under its own privacy policy. Map requests show which area of the map you are viewing. Kilat turns off Mapbox's optional usage telemetry.</p>
 
-<h2>What stays on your iPhone</h2>
+<h2>What stays on your device</h2>
 <p>Kilat keeps recent data and your settings (such as the selected lens, layers and air index) on your device so it opens quickly. Deleting the app removes them.</p>
 
 <h2>Children</h2>
-<p>Kilat is suitable for all ages and collects no personal data from anyone, including children.</p>
+<p>Kilat is suitable for all ages. It collects nothing beyond the alert record above, from anyone, including children.</p>
 
 <h2>Changes</h2>
 <p>If this policy changes, the new version will be posted on this page with a new effective date.</p>
