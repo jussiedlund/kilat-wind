@@ -145,9 +145,15 @@ def nea_outlook(raw, ctx):
               + (' This outlook has EXPIRED.' if data.get('expired') else f" Valid until {sgt(r['validUntil'])} SGT."), r)]
     if r.get('context'):
         lines.append((f"NEA's situation note: {r['context']}", None))
+    written = t(r['issuedAt']).astimezone(SGT)
+    tomorrow = relative_day((written + timedelta(days=1)).date().isoformat(), now)
     for p in r.get('paragraphs', []):
+        text = p.lstrip("0123456789. ")
         if 'forecast' in p.lower() and 'psi' in p.lower() or p.startswith('Singapore,'):
-            lines.append((f'NEA bulletin text: "{p.lstrip("0123456789. ")}"', None))
+            lines.append((f'NEA bulletin text: "{text}"', None))
+        elif text.startswith('For ') and 'activities' not in text and 'updates' not in text:
+            # NEA's own view of the coming days; its "tomorrow" is relative to when it was written.
+            lines.append((f'NEA bulletin, looking ahead (written {written:%a %H:%M}; its "tomorrow" is {tomorrow}): "{text}"', None))
     return lines
 
 

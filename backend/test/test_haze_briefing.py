@@ -72,6 +72,20 @@ def kilat_outlook(expires='2026-10-09T06:00:00Z'):
             'smokeOverSingapore': steps, 'status': 'ok'}
 
 
+class NeaOutlookTests(Base):
+    def test_looking_ahead_paragraphs_reach_the_digest(self):
+        path = self.folder / 'raw' / 'haze_outlook.json'
+        outlook = json.loads(path.read_text())
+        outlook['report']['paragraphs'] += ['6. For tomorrow, winds are expected to blow from the southwest.',
+                                            '7. For immediate outdoor activities, please check the readings.']
+        path.write_text(json.dumps(outlook))
+        n = publish.section(self.digest(), 'N')
+        self.assertIn('its "tomorrow" is', n)
+        self.assertIn('"For tomorrow, winds are expected to blow from the southwest."', n)
+        self.assertNotIn('immediate outdoor', n)
+        self.assertNotIn('For updates', n)
+
+
 class KilatForecastTests(Base):
     def add_outlook(self, outlook):
         (self.folder / 'raw' / 'kilat_outlook.json').write_text(json.dumps(outlook))
