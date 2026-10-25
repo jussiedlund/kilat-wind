@@ -53,6 +53,80 @@ class Base(unittest.TestCase):
         return self.produce(fake=(json.dumps(GOOD), 'end_turn'))['digest_md']
 
 
+def kilat_outlook(expires='2026-10-09T06:00:00Z'):
+    """An experimental outlook issued the evening before the fixture (Thu 8 Oct 11:14 SGT), steps every 3 h."""
+    classes = ['heavy'] * 5 + ['moderate'] * 6 + ['light'] * 4
+    steps = []
+    for i, smoke in enumerate(classes):
+        step = {'time': f'2026-10-{7 + (18 + 3 * i) // 24:02d}T{(18 + 3 * i) % 24:02d}:00:00Z', 'leadHours': 3 * i,
+                'class': smoke, 'value': 70.0, 'regions': {'South Sumatra': 0.6, 'Riau/Jambi': 0.1, 'other': 0.3}}
+        if i == 3:
+            step['pm25'] = {'value': 63, 'low': 47, 'high': 81}
+        if i == 10:
+            step['pm25'] = {'value': 41, 'low': 30, 'high': 57}
+        steps.append(step)
+    return {'schemaVersion': 1, 'experimental': True, 'issueTime': '2026-10-07T18:00:00Z', 'expiresAt': expires,
+            'model': 'gfs', 'today': {'date': '2026-10-08', 'peakSoFar': 40, 'asOf': '2026-10-07T18:00:00Z'},
+            'tomorrow': {'date': '2026-10-09', 'peakPm25': {'value': 120, 'low': 85, 'high': 228}, 'band': 'Elevated',
+                         'otherModel': {'model': 'ecmwf', 'value': 95}},
+            'smokeOverSingapore': steps, 'status': 'ok'}
+
+
+class KilatForecastTests(Base):
+    def add_outlook(self, outlook):
+        (self.folder / 'raw' / 'kilat_outlook.json').write_text(json.dumps(outlook))
+        manifest = json.loads((self.folder / 'manifest.json').read_text())
+        manifest['sources']['kilat_outlook'] = {'status': 'ok'}
+        (self.folder / 'manifest.json').write_text(json.dumps(manifest))
+
+    def test_missing_outlook_says_unavailable(self):
+        self.assertIn("[K1] Kilat's experimental forecast: unavailable", self.digest())
+
+    def test_peak_steps_and_direction(self):
+        self.add_outlook(kilat_outlook())
+        k = publish.section(self.digest(), 'K')
+        self.assertIn('can be wrong', k)
+        self.assertIn('tomorrow (Fri 9 Oct): about 120 µg/m³ (range 85–228), Elevated band; the ECMWF-driven run says 95', k)
+        self.assertNotIn('18:00 (Wed)', k, 'steps more than 90 min old are left out')
+        self.assertIn('today 11:00 (Thu) to today 14:00 (Thu): smoke over Singapore heavy, mainly from South Sumatra; '
+                      'estimated 1-hr PM2.5 11:00 63 (47–81).', k)
+        self.assertIn('Estimated PM2.5 falling', k)
+        self.assertIn('thinning', k)
+        self.assertNotIn('Riau', k, 'sources under 30% are not named')
+
+    def test_expired_outlook_lists_nothing_ahead(self):
+        self.add_outlook(kilat_outlook(expires='2026-10-08T00:00:00Z'))
+        k = publish.section(self.digest(), 'K')
+        self.assertIn('EXPIRED', k)
+        self.assertNotIn('[K2]', k)
+
+    def test_hero_days_must_be_in_the_forecast(self):
+        self.add_outlook(kilat_outlook())
+        digest = self.digest()
+        self.assertIsNone(publish.hero_problem('Smoke from Sumatra may ease by Friday', digest))
+        self.assertIsNone(publish.hero_problem('Lighter haze likely tomorrow', digest))
+        self.assertEqual(publish.hero_problem('Smoke easing by Monday', digest), 'Monday is not in the Kilat forecast')
+        self.add_outlook(kilat_outlook(expires='2026-10-08T00:00:00Z'))
+        self.assertEqual(publish.hero_problem('Smoke from Sumatra may ease by Friday', self.digest()),
+                         'Friday is not in the Kilat forecast')
+
+    def test_uncited_forecast_warns(self):
+        self.add_outlook(kilat_outlook())
+        digest = self.digest()
+        _, reasons, warnings = publish.validate(json.dumps(GOOD), 'end_turn', digest)
+        self.assertEqual(reasons, [])
+        self.assertIn('experimental forecast available but not cited in summary or ahead', warnings)
+        cited = dict(GOOD, evidence={'summary': ['S1'], 'ahead': ['[K4]', 'N1']})
+        self.assertEqual(publish.validate(json.dumps(cited), 'end_turn', digest)[2], [])
+
+    def test_quoting_a_forecast_number_only_warns(self):
+        self.add_outlook(kilat_outlook())
+        _, reasons, warnings = publish.validate(json.dumps(dict(GOOD, ahead='The model hints at up to 228 tomorrow.')),
+                                                'end_turn', self.digest())
+        self.assertEqual(reasons, [])
+        self.assertIn('quotes experimental forecast number 228', warnings)
+
+
 class ValidatorTests(Base):
     def check(self, card, stop='end_turn', text=None):
         return publish.validate(text if text is not None else json.dumps(card), stop, self.digest())
@@ -109,12 +183,14 @@ class ValidatorTests(Base):
         self.assertTrue(any('number 15 ' in r for r in reasons))
 
     def test_hero_lines_kept_or_dropped_with_warnings(self):
-        hero = {'north': 'Lighter haze for now', 'south': 'Haze picking up', 'east': 'Air is clear today',
-                'west': 'PM2.5 at 70', 'central': 'Smoky but easing slowly over here today'}
+        hero = {'north': 'Expect haze to taper off later today', 'south': 'Smoke drifting in from Sumatra',
+                'east': 'Air is clear today', 'west': 'PM2.5 at 70 and rising',
+                'central': 'Smoky but easing slowly over here later this afternoon'}
         card, reasons, warnings = self.check(dict(GOOD, hero=hero))
         self.assertEqual(reasons, [])
-        self.assertEqual(card['hero'], {'north': 'Lighter haze for now', 'south': 'Haze picking up'})
-        self.assertEqual(sum('dropped' in w for w in warnings), 3)
+        self.assertEqual(card['hero'], {'north': 'Expect haze to taper off later today', 'south': 'Smoke drifting in from Sumatra'})
+        self.assertEqual(sorted(w.split(':')[0] for w in warnings if 'dropped' in w),
+                         ['hero central dropped (54 chars, 9 words)', 'hero east dropped (clear/clean)', 'hero west dropped (digits)'])
         card, reasons, warnings = self.check(dict(GOOD, hero='nope'))
         self.assertEqual((reasons, card['hero']), ([], None))
 

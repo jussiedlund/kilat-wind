@@ -151,6 +151,99 @@ def nea_outlook(raw, ctx):
     return lines
 
 
+SMOKE_CLASSES = ('none', 'light', 'moderate', 'heavy', 'very heavy')
+MAIN_SOURCE_SHARE = 0.3  # a source region is named only above this share of the smoke (decision 133)
+
+
+def step_time(value, now):
+    """'today 14:00 (Sun)' style: the day word does the arithmetic, the weekday lets a line name the day."""
+    at = t(value).astimezone(SGT)
+    word = {-1: 'yesterday', 0: 'today', 1: 'tomorrow'}.get((at.date() - now.astimezone(SGT).date()).days)
+    return f"{word} {at:%H:%M} ({at:%a})" if word else f"{at:%a %H:%M}"
+
+
+def main_sources(shares):
+    named = sorted(((v, k) for k, v in (shares or {}).items() if k != 'other' and v >= MAIN_SOURCE_SHARE), reverse=True)
+    return [k for _, k in named]
+
+
+def kilat_forecast(raw, ctx):
+    """Kilat's own experimental outlook. Direction and source matter more than its numbers, which have run high in haze."""
+    data, now = raw.get('kilat_outlook'), ctx['now']
+    if not data or data.get('status', 'ok') != 'ok' or not data.get('issueTime'):
+        return [("Kilat's experimental forecast: unavailable in this snapshot. Hero lines describe now only.", None)]
+    expired = bool(data.get('expiresAt')) and now >= t(data['expiresAt'])
+    lines = [(f"Kilat's experimental haze forecast (a research model, not NEA), issued {sgt(data['issueTime'])} SGT "
+              f"({ago(data['issueTime'], now)}). It can be wrong: in recent haze its PM2.5 numbers have run high and its "
+              "ranges were too narrow. NEA's outlook [N] is the official one. Use this for direction (thickening, easing) "
+              "and where the smoke comes from, held lightly; never state its numbers as fact. Its smoke class is a "
+              "relative model index for smoke in the low air around Singapore, not a measurement."
+              + (" This forecast has EXPIRED: do not use it for what comes next." if expired else ''),
+              {'issueTime': data['issueTime'], 'expired': expired})]
+    if expired:
+        return lines
+    peak = (data.get('tomorrow') or {}).get('peakPm25') or {}
+    if peak.get('value') is not None:
+        tomorrow = data['tomorrow']
+        other = (tomorrow.get('otherModel') or {}).get('value')
+        lines.append((f"Estimated highest 1-hr PM2.5 {relative_day(tomorrow['date'], now)}: about {peak['value']} µg/m³ "
+                      f"(range {peak['low']}–{peak['high']})" + (f", {tomorrow['band']} band" if tomorrow.get('band') else '')
+                      + (f"; the ECMWF-driven run says {other}." if other is not None else '.'), peak))
+    steps = [s for s in data.get('smokeOverSingapore') or [] if t(s['time']) >= now - timedelta(minutes=90)]
+    groups = []  # consecutive steps with the same smoke class and sources read as one line
+    for s in steps:
+        key = (s['class'], tuple(sorted(main_sources(s.get('regions')))) if s['class'] != 'none' else ())
+        if groups and groups[-1][0] == key:
+            groups[-1][1].append(s)
+        else:
+            groups.append((key, [s]))
+    for (smoke, _), members in groups:
+        span = step_time(members[0]['time'], now) + (f" to {step_time(members[-1]['time'], now)}" if len(members) > 1 else '')
+        text = f"{span}: smoke over Singapore {smoke}"
+        if smoke != 'none' and (names := main_sources(members[0].get('regions'))):
+            text += f", mainly from {' and '.join(names)}"
+        estimates = [f"{t(m['time']).astimezone(SGT):%H:%M} {m['pm25']['value']} ({m['pm25']['low']}–{m['pm25']['high']})"
+                     for m in members if (m.get('pm25') or {}).get('value') is not None]
+        if estimates:
+            text += '; estimated 1-hr PM2.5 ' + ', '.join(estimates)
+        lines.append((text + '.', None))
+    window = [s for s in steps if t(s['time']) <= now + timedelta(hours=24)]
+    if len(window) >= 2:
+        rank = {c: i for i, c in enumerate(SMOKE_CLASSES)}
+        first, last = window[0], window[-1]
+        top = max(window, key=lambda s: rank.get(s['class'], 0))
+        shift = rank.get(last['class'], 0) - rank.get(first['class'], 0)
+        smoke = 'thickening' if shift > 0 else 'thinning' if shift < 0 else 'about the same'
+        if len({s['class'] for s in window}) == 1:
+            text = f"Next 24 h in short: smoke {first['class']} throughout, no change in class."
+        else:
+            text = (f"Next 24 h in short: smoke {first['class']} at first, thickest ({top['class']}) {step_time(top['time'], now)}, "
+                    f"{last['class']} by {step_time(last['time'], now)}: {smoke}.")
+        values = [s['pm25']['value'] for s in window if (s.get('pm25') or {}).get('value') is not None]
+        if len(values) >= 2:
+            gap = values[-1] - values[0]
+            trend = 'rising' if gap >= max(10, 0.15 * values[0]) else 'falling' if -gap >= max(10, 0.15 * values[0]) else 'roughly steady'
+            text += f" Estimated PM2.5 {trend} across the period."
+        total = {}
+        for s in window:
+            for k, v in (s.get('regions') or {}).items():
+                total[k] = total.get(k, 0) + v
+        share = sum(total.values()) or 1
+        names = main_sources({k: v / share for k, v in total.items()})
+        if names:
+            text += f" Main source over the period: {' and '.join(names)}."
+        lines.append((text, {'smoke': smoke, 'sources': names}))
+    latest = [pts[-1][1] for r in REGIONS if (pts := series(raw, 'pm25', r))]
+    if steps and latest:
+        if steps[0]['class'] in ('heavy', 'very heavy') and max(latest) <= 55:
+            lines.append((f"Out of step right now: the model has {steps[0]['class']} smoke around Singapore, but every region reads Normal. "
+                          "Trust the readings [L] for now; keep anything about later loose.", None))
+        elif steps[0]['class'] in ('none', 'light') and max(latest) > 55:
+            lines.append(("Out of step right now: the model has little smoke around Singapore, but readings are Elevated or higher. "
+                          "Trust the readings [L] for now; keep anything about later loose.", None))
+    return lines
+
+
 def singapore_now(raw, ctx):
     d, now = raw, ctx['now']
     lines, facts = [], {}
@@ -505,6 +598,7 @@ def standout(raw, ctx):
 
 SECTIONS = [
     ('N', 'Official NEA haze outlook', nea_outlook),
+    ('K', "Kilat's experimental forecast (can be wrong)", kilat_forecast),
     ('L', 'Singapore air right now', singapore_now),
     ('A', 'Health advisory shown in the app', advisory),
     ('R', 'Regional stations (Malaysia, Indonesia)', regional_stations),

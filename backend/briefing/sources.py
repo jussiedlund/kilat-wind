@@ -89,6 +89,14 @@ def gfs_wind(now):
             'expiresAt': model.expires_at.isoformat(), 'points': samples}
 
 
+def kilat_outlook(now):
+    """The experimental haze outlook without its map frames and trajectories, which the digest never reads."""
+    data = fetch(WORKER + '/v1/haze')
+    for heavy in ('smokeMap', 'air'):
+        data.pop(heavy, None)
+    return data
+
+
 SOURCES = {
     # Singapore hourly PM2.5 and PSI straight from NEA, today and yesterday (SGT days).
     'pm25_today': data_gov('pm25', 0),
@@ -99,6 +107,8 @@ SOURCES = {
     'snapshot': worker(f"/v1/snapshot?lat={PLACE['lat']}&lon={PLACE['lon']}"),
     # NEA's daily haze bulletin, parsed by the backend.
     'haze_outlook': worker('/v1/haze-outlook'),
+    # Kilat's experimental smoke and PM2.5 outlook (research model, issued 06 and 18 UTC).
+    'kilat_outlook': kilat_outlook,
     # Latest hotspot points and haze polygons from haze.gov.sg.
     'regional': worker('/v1/regional'),
     # Seven days of hotspot captures, for "more or fewer than recent days".

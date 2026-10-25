@@ -33,7 +33,9 @@ POINT_LIMIT, POINT_HARD_LIMIT = 130, 200  # per bullet in `points`
 ADVICE_RE = re.compile(r'\b(should|wear\w*|stay\w* (?:indoors|inside|home)|avoid\w*|reduc\w* (?:\w+ )?(?:outdoor|activity|exertion)|masks?|exercis\w*|n95|close (?:your|the) windows|advis\w*)\b', re.I)
 CLEAR_RE = re.compile(r'\b(clear|clearer|clean|cleaner)\b', re.I)
 REGIONS = ('north', 'south', 'east', 'west', 'central')
-HERO_MAX = 24
+HERO_MAX, HERO_WORDS = 45, (2, 8)  # one forward-looking line under the big number (decision 158)
+WEEKDAYS = {d.lower(): d[:3] for d in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')}
+DAY_RE = re.compile(r'\b(' + '|'.join(WEEKDAYS) + r'|tomorrow)\b', re.I)
 NUMBER_RE = re.compile(r'[0-9]+(?:\.[0-9]+)?')
 
 
@@ -56,6 +58,31 @@ def numbers(text):
         whole, _, frac = n.partition('.')
         found.add((whole.lstrip('0') or '0') + ('.' + frac if frac else ''))
     return found
+
+
+def section(digest_text, prefix):
+    """The digest lines of one section, e.g. 'K' for Kilat's experimental forecast."""
+    return '\n'.join(line for line in digest_text.splitlines() if re.match(rf'\[{prefix}[0-9]+\]', line))
+
+
+def hero_problem(line, digest_text):
+    """Why a hero line cannot be shown, or None. A day it names must be one the forecasts in the digest cover."""
+    words = len(line.split())
+    if len(line) > HERO_MAX or not HERO_WORDS[0] <= words <= HERO_WORDS[1]:
+        return f'{len(line)} chars, {words} words'
+    if re.search(r'[0-9]', line):
+        return 'digits'
+    if CLEAR_RE.search(line):
+        return 'clear/clean'
+    kilat = section(digest_text, 'K')
+    if 'EXPIRED' in kilat or 'unavailable' in kilat:
+        kilat = ''
+    for day in {m.group(1).lower() for m in DAY_RE.finditer(line)}:
+        if day == 'tomorrow' and 'tomorrow' not in kilat + section(digest_text, 'N'):
+            return 'tomorrow is not in a forecast'
+        if day != 'tomorrow' and not re.search(rf'\b{WEEKDAYS[day]}\b', kilat):
+            return f'{day.title()} is not in the Kilat forecast'
+    return None
 
 
 def precheck(manifest, raw):
@@ -138,8 +165,8 @@ def validate(text, stop_reason, digest_text):
                 line = hero.get(region)
                 if not isinstance(line, str) or not line.strip():
                     warnings.append(f'hero {region} missing')
-                elif len(line) > HERO_MAX or not 1 <= len(line.split()) <= 4 or re.search(r'[0-9]', line) or CLEAR_RE.search(line):
-                    warnings.append(f'hero {region} dropped: {line!r}')
+                elif problem := hero_problem(line.strip(), digest_text):
+                    warnings.append(f'hero {region} dropped ({problem}): {line!r}')
                 else:
                     kept[region] = line.strip().rstrip('.')
         card['hero'] = kept or None
@@ -148,6 +175,16 @@ def validate(text, stop_reason, digest_text):
     if not re.fullmatch(r'S[0-9]+', lead_id) or f'[{lead_id}]' not in digest_text:
         reasons.append(f'lead {lead!r} is not an S-id in the digest')
     joined = ' '.join(prose)
+    kilat = section(digest_text, 'K')
+    if kilat and 'EXPIRED' not in kilat and 'unavailable' not in kilat:
+        evidence = card.get('evidence') if isinstance(card.get('evidence'), dict) else {}
+        cited = [i for k in ('summary', 'ahead') for i in (evidence.get(k) or []) if isinstance(i, str)]
+        if not any(i.strip('[]').startswith('K') for i in cited):
+            warnings.append('experimental forecast available but not cited in summary or ahead')
+    # Forecast numbers are allowed (they are in the digest) but the prompt asks for direction, not numbers.
+    forecast_only = numbers(section(digest_text, 'K')) - numbers(digest_text.replace(section(digest_text, 'K'), ''))
+    for n in sorted(numbers(joined) & forecast_only):
+        warnings.append(f'quotes experimental forecast number {n}')
     for hit in sorted({m.group(0).lower() for m in ADVICE_RE.finditer(joined)}):
         warnings.append(f'advice-like phrasing: {hit}')
     for hit in sorted({m.group(0).lower() for m in CLEAR_RE.finditer(joined)}):
