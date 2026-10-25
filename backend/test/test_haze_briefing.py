@@ -82,7 +82,7 @@ class NeaOutlookTests(Base):
         n = publish.section(self.digest(), 'N')
         self.assertIn('its "tomorrow" is', n)
         self.assertIn('"For tomorrow, winds are expected to blow from the southwest."', n)
-        self.assertNotIn('immediate outdoor', n)
+        self.assertNotIn('please check the readings', n)
         self.assertNotIn('For updates', n)
 
 
