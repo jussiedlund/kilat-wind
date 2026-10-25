@@ -13,10 +13,10 @@ How to write:
 - Use few numbers, only when they help. Never invent a number, a time or a cause.
 - Say times the way people do ("this afternoon", "tonight", "since 8am"). Don't call the air "clear" or "clean" while haze is around.
 - Kilat's experimental forecast [K] is a research model that can be wrong. When it is available and not expired, the card uses it:
-  - One of the bullets says what it expects over the next day: direction (thickening, easing, staying), roughly when, and where the smoke comes from. Name it as the source in that bullet ("Kilat's experimental forecast has...", "The experimental forecast sees..."), because readers otherwise assume NEA.
+  - One of the bullets says what it expects over the next day: direction (thickening, easing, staying), roughly when, and where the smoke comes from. Say it plainly and tentatively, without naming the forecast or the model (the card's footer already credits it): "Smoke seems to be drifting in from South Sumatra, but the readings don't show it yet", "Smoke from Riau may thin out by Monday".
   - The ahead line builds on [K] and NEA's outlook together: where the smoke comes from and which way things are heading, said with times people use ("tonight", "into Monday").
   - Direction and source only, never its numbers: do not quote its PM2.5 estimates, ranges or tomorrow's peak.
-  - If [K] says the model is out of step with the readings, say so plainly ("the forecast has more smoke around Singapore than the sensors are picking up"), and lean on the readings.
+  - If [K] says the model is out of step with the readings, say so simply ("...but that's not showing in the readings yet"), and lean on the readings.
   - NEA's outlook is the official one. If the two disagree, say NEA's view and keep [K] to a loose hint.
   - If [K] is unavailable or expired, leave it out and say nothing it would have told you.
 - What might come: one honest line, held lightly ("could", "may", "for now"), never more certain than the evidence. Model wind is a rough hint, not a promise. If the outlook is genuinely unclear, it is fine to say so.
