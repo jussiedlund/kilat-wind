@@ -264,7 +264,7 @@ class KilatForecastTests(Base):
 
     def test_quoting_a_forecast_number_only_warns(self):
         self.add_outlook(kilat_outlook())
-        _, reasons, warnings = publish.validate(json.dumps(dict(GOOD, ahead='The model hints at up to 228 tomorrow.')),
+        _, reasons, warnings = publish.validate(json.dumps(dict(GOOD, ahead='Smoke may build to 228 tomorrow.')),
                                                 'end_turn', self.digest())
         self.assertEqual(reasons, [])
         self.assertIn('quotes experimental forecast number 228', warnings)
@@ -373,8 +373,11 @@ class ValidatorTests(Base):
 
     def test_naming_kilat_rejects_card_and_drops_hero(self):
         _, reasons, _ = self.check(dict(GOOD, points=['Kilat sees South Sumatra smoke possibly drifting in.', 'Readings are steady.']))
-        self.assertIn('names Kilat in the third person', reasons)
-        self.assertEqual(publish.hero_problem('Kilat sees smoke coming', ''), 'names Kilat')
+        self.assertIn('names Kilat or the model in the third person', reasons)
+        self.assertEqual(publish.hero_problem('Kilat sees smoke coming', ''), 'names Kilat or the model')
+        _, reasons, _ = self.check(dict(GOOD, ahead='Showers may help, though the smoke model still shows heavy smoke.'))
+        self.assertIn('names Kilat or the model in the third person', reasons)
+        self.assertEqual(publish.hero_problem('The model hints at more smoke', ''), 'names Kilat or the model')
 
     def test_advice_and_clear_are_warnings_only(self):
         card, reasons, warnings = self.check(dict(GOOD, ahead='You should stay indoors; the air is clear.'))

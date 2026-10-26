@@ -32,8 +32,8 @@ HARD_LIMITS = {'headline': 90, 'summary': 650, 'ahead': 320}  # over these: some
 POINT_LIMIT, POINT_HARD_LIMIT = 130, 200  # per bullet in `points`
 ADVICE_RE = re.compile(r'\b(should|wear\w*|stay\w* (?:indoors|inside|home)|avoid\w*|reduc\w* (?:\w+ )?(?:outdoor|activity|exertion)|masks?|exercis\w*|n95|close (?:your|the) windows|advis\w*)\b', re.I)
 CLEAR_RE = re.compile(r'\b(clear|clearer|clean|cleaner)\b', re.I)
-# The card is Kilat's own voice: it never talks about Kilat in the third person.
-SELF_RE = re.compile(r'\bKilat\b', re.I)
+# The card is Kilat's own voice: it never talks about Kilat or its model in the third person.
+SELF_RE = re.compile(r'\bKilat\b|\bthe (?:smoke |haze |experimental |research )?model\b', re.I)
 WIND_WORD_RE = re.compile(r'\bwinds?\b|erlies\b|erly\b', re.I)
 DIRECTION_ABBR_RE = re.compile(r'\b(NE|NW|SE|SW|N|E|S|W)\b')  # case-sensitive so "it's" is not S
 DIRECTION_WORD_RE = re.compile(r'\b(north|south)?(east|west)?(?:ern|erly|erlies)?\b', re.I)
@@ -82,7 +82,7 @@ def hero_problem(line, digest_text):
     if CLEAR_RE.search(line):
         return 'clear/clean'
     if SELF_RE.search(line):
-        return 'names Kilat'
+        return 'names Kilat or the model'
     problem = wind_problem(line, digest_text)
     if problem:
         return problem
@@ -221,7 +221,7 @@ def validate(text, stop_reason, digest_text):
         reasons.append(f'lead {lead!r} is not an S-id in the digest')
     joined = ' '.join(prose)
     if SELF_RE.search(joined + ' ' + str(card.get('headline', ''))):
-        reasons.append('names Kilat in the third person')
+        reasons.append('names Kilat or the model in the third person')
     kilat = section(digest_text, 'K')
     if kilat and 'EXPIRED' not in kilat and 'unavailable' not in kilat:
         evidence = card.get('evidence') if isinstance(card.get('evidence'), dict) else {}
