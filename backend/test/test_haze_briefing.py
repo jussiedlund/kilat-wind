@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import math
 import shutil
 import sqlite3
 import sys
@@ -12,7 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'briefing'))
+import digest as digest_mod  # noqa: E402
 import publish  # noqa: E402
+import sources  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures' / 'haze-briefing'
 SNAPSHOT = FIXTURES / '2026-10-08T1114'
@@ -84,6 +87,132 @@ class NeaOutlookTests(Base):
         self.assertIn('"For tomorrow, winds are expected to blow from the southwest."', n)
         self.assertNotIn('please check the readings', n)
         self.assertNotIn('For updates', n)
+
+
+COMPASS_DEG = {'N': 0, 'NE': 45, 'E': 90, 'SE': 135, 'S': 180, 'SW': 225, 'W': 270, 'NW': 315}
+POINT_COORDS = {'Singapore': (1.35, 103.82), 'Riau (Pekanbaru)': (0.51, 101.45), 'Jambi': (-1.61, 103.61)}
+
+
+def wind_from(label, speed=5.0):
+    if label == 'calm':
+        return 0.5, 0.5
+    d = math.radians(COMPASS_DEG[label])
+    return round(-speed * math.sin(d), 2), round(-speed * math.cos(d), 2)
+
+
+def transport(past, ahead, fire=None):
+    """A gfs_transport raw source for the fixture hour (Thu 8 Oct 03:14 UTC): 9 past and 8 coming 3-hourly samples."""
+    rows = []
+    for i, label in enumerate(past):
+        rows.append((f'2026-10-{7 + (3 + 3 * i) // 24:02d}T{(3 + 3 * i) % 24:02d}:00:00+00:00', label, 'analysis'))
+    for i, label in enumerate(ahead):
+        rows.append((f'2026-10-{8 + (6 + 3 * i) // 24:02d}T{(6 + 3 * i) % 24:02d}:00:00+00:00', label, 'forecast'))
+    points = {}
+    for name, (lat, lon) in POINT_COORDS.items():
+        samples = []
+        for at, label, kind in rows:
+            if name != 'Singapore' and fire:
+                label = fire
+            u, v = wind_from(label)
+            samples.append({'at': at, 'u': u, 'v': v, 'kind': kind})
+        points[name] = {'lat': lat, 'lon': lon, 'samples': samples}
+    return {'source': 'NOAA GFS 0.25 degree, 925 hPa wind', 'cycleAt': '2026-10-07T18:00:00+00:00', 'points': points}
+
+
+NOW = digest_mod.t('2026-10-08T03:14:17+00:00')
+
+
+def story(past, ahead, **kw):
+    return digest_mod.wind_story({'gfs_transport': transport(past, ahead, **kw)}, {'now': NOW})
+
+
+class WindStoryTests(Base):
+    def add_transport(self, data):
+        (self.folder / 'raw' / 'gfs_transport.json').write_text(json.dumps(data))
+        manifest = json.loads((self.folder / 'manifest.json').read_text())
+        manifest['sources']['gfs_transport'] = {'status': 'ok'}
+        (self.folder / 'manifest.json').write_text(json.dumps(manifest))
+
+    def test_northwest_then_southwest_shift(self):
+        text = story(['NW'] * 6 + ['SW'] * 3, ['SW'] * 8, fire='SW')
+        self.assertIn('Past 24 h: from NW until 05:00 today, from SW since.', text)
+        self.assertIn('Now: from SW.', text)
+        self.assertIn('Next 24 h: from SW for the whole period, pointing from the Riau and Jambi fire areas toward Singapore', text)
+        self.assertIn('a model, not a measurement', text)
+
+    def test_no_shift(self):
+        text = story(['SW'] * 9, ['SW'] * 8)
+        self.assertIn('Past 24 h: from SW the whole time.', text)
+        self.assertIn('Next 24 h: from SW for the whole period', text)
+
+    def test_single_sample_wobble_is_ignored(self):
+        text = story(['SW'] * 4 + ['NW'] + ['SW'] * 4, ['SW'] * 8)
+        self.assertIn('Past 24 h: from SW the whole time.', text)
+
+    def test_calm_is_light_and_variable(self):
+        text = story(['SW'] * 9, ['calm'] * 8)
+        self.assertIn('Next 24 h: light and variable for the whole period', text)
+        text = story(['calm'] * 9, ['calm'] * 8)
+        self.assertIn('Past 24 h: light and variable the whole time.', text)
+        self.assertIn('Now: light and variable.', text)
+
+    def test_winds_pointing_away_from_fires(self):
+        text = story(['SW'] * 9, ['NE'] * 8, fire='NE')
+        self.assertIn('not pointing from the Riau and Jambi fire areas toward Singapore', text)
+
+    def test_source_missing_or_short_gives_no_line(self):
+        self.assertIsNone(digest_mod.wind_story({}, {'now': NOW}))
+        data = transport(['SW'] * 9, ['SW'] * 8)
+        data['points']['Singapore']['samples'] = data['points']['Singapore']['samples'][:3]
+        self.assertIsNone(digest_mod.wind_story({'gfs_transport': data}, {'now': NOW}))
+
+    def test_digest_builds_without_the_source(self):
+        w = publish.section(self.digest(), 'W')
+        self.assertNotIn('GFS 925 hPa', w)
+        self.assertIn('[W1]', w)
+
+    def test_story_is_first_wind_line(self):
+        self.add_transport(transport(['NW'] * 6 + ['SW'] * 3, ['SW'] * 8))
+        first = publish.section(self.digest(), 'W').splitlines()[0]
+        self.assertTrue(first.startswith('[W1] Wind over Singapore at about 750 m'))
+
+    def test_hero_wind_clause_checked_against_the_story(self):
+        self.add_transport(transport(['NW'] * 6 + ['SW'] * 3, ['SW'] * 8))
+        digest = self.digest()
+        self.assertIsNone(publish.hero_problem('Winds back to SW, more smoke may follow', digest))
+        self.assertIsNone(publish.hero_problem('Southwesterlies may bring more smoke', digest))
+        self.assertIsNone(publish.hero_problem('Smoke may drift in later', digest))
+        self.assertEqual(publish.hero_problem('Northwesterly winds may thin the haze', digest),
+                         'wind direction not in the wind story')
+        self.assertEqual(publish.hero_problem('Winds from the north, haze may ease', digest),
+                         'wind direction not in the wind story')
+
+    def test_hero_wind_clause_dropped_without_a_story(self):
+        digest = self.digest()
+        self.assertEqual(publish.hero_problem('Winds back to SW, more smoke may follow', digest),
+                         'wind clause without a wind story')
+        self.assertIsNone(publish.hero_problem("Haze may ease, it's lighter for now", digest))
+
+    def test_direction_words_need_a_wind_word(self):
+        self.add_transport(transport(['SW'] * 9, ['SW'] * 8))
+        self.assertIsNone(publish.hero_problem('Haze thickest in the north for now', self.digest()))
+        self.assertEqual(publish.line_directions("it's northwesterly, SE and southeast"), {'NW', 'SE'})
+
+    def test_real_fetch_fixture_decodes_into_a_story(self):
+        data = json.loads((FIXTURES / 'gfs_transport-2026-10-26.json').read_text())
+        text = digest_mod.wind_story({'gfs_transport': data}, {'now': digest_mod.t('2026-10-26T09:45:00+00:00')})
+        self.assertIn('Past 24 h:', text)
+        self.assertIn('Next 24 h:', text)
+
+    def test_transport_plan_spans_two_days_with_few_requests(self):
+        now = digest_mod.t('2026-10-26T09:45:00+00:00')
+        cycle = digest_mod.t('2026-10-26T06:00:00+00:00')
+        plan = sources.transport_plan(now, cycle)
+        self.assertEqual(plan[0][0], digest_mod.t('2026-10-25T09:00:00+00:00'))
+        self.assertEqual(plan[-1][0], digest_mod.t('2026-10-27T09:00:00+00:00'))
+        self.assertEqual({k for *_, k in plan}, {'analysis', 'forecast'})
+        self.assertLessEqual(len({(c, h) for _, c, h, _ in plan}), 20)
+        self.assertTrue(all(h in (0, 3) for _, _, h, k in plan if k == 'analysis'))
 
 
 class KilatForecastTests(Base):
@@ -241,6 +370,11 @@ class ValidatorTests(Base):
         for stop in ('refusal', 'max_tokens'):
             _, reasons, _ = self.check(GOOD, stop=stop)
             self.assertIn(f'stop_reason {stop}', reasons)
+
+    def test_naming_kilat_rejects_card_and_drops_hero(self):
+        _, reasons, _ = self.check(dict(GOOD, points=['Kilat sees South Sumatra smoke possibly drifting in.', 'Readings are steady.']))
+        self.assertIn('names Kilat in the third person', reasons)
+        self.assertEqual(publish.hero_problem('Kilat sees smoke coming', ''), 'names Kilat')
 
     def test_advice_and_clear_are_warnings_only(self):
         card, reasons, warnings = self.check(dict(GOOD, ahead='You should stay indoors; the air is clear.'))

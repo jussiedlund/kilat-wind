@@ -32,6 +32,13 @@ HARD_LIMITS = {'headline': 90, 'summary': 650, 'ahead': 320}  # over these: some
 POINT_LIMIT, POINT_HARD_LIMIT = 130, 200  # per bullet in `points`
 ADVICE_RE = re.compile(r'\b(should|wear\w*|stay\w* (?:indoors|inside|home)|avoid\w*|reduc\w* (?:\w+ )?(?:outdoor|activity|exertion)|masks?|exercis\w*|n95|close (?:your|the) windows|advis\w*)\b', re.I)
 CLEAR_RE = re.compile(r'\b(clear|clearer|clean|cleaner)\b', re.I)
+# The card is Kilat's own voice: it never talks about Kilat in the third person.
+SELF_RE = re.compile(r'\bKilat\b', re.I)
+WIND_WORD_RE = re.compile(r'\bwinds?\b|erlies\b|erly\b', re.I)
+DIRECTION_ABBR_RE = re.compile(r'\b(NE|NW|SE|SW|N|E|S|W)\b')  # case-sensitive so "it's" is not S
+DIRECTION_WORD_RE = re.compile(r'\b(north|south)?(east|west)?(?:ern|erly|erlies)?\b', re.I)
+DIRECTION_STEMS = {'north': 'N', 'south': 'S', 'east': 'E', 'west': 'W', 'northeast': 'NE', 'northwest': 'NW',
+                   'southeast': 'SE', 'southwest': 'SW'}
 REGIONS = ('north', 'south', 'east', 'west', 'central')
 HERO_MAX, HERO_WORDS = 45, (2, 8)  # one forward-looking line under the big number (decision 158)
 WEEKDAYS = {d.lower(): d[:3] for d in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')}
@@ -74,6 +81,11 @@ def hero_problem(line, digest_text):
         return 'digits'
     if CLEAR_RE.search(line):
         return 'clear/clean'
+    if SELF_RE.search(line):
+        return 'names Kilat'
+    problem = wind_problem(line, digest_text)
+    if problem:
+        return problem
     kilat = section(digest_text, 'K')
     if 'EXPIRED' in kilat or 'unavailable' in kilat:
         kilat = ''
@@ -82,6 +94,39 @@ def hero_problem(line, digest_text):
             return 'tomorrow is not in a forecast'
         if day != 'tomorrow' and not re.search(rf'\b{WEEKDAYS[day]}\b', kilat):
             return f'{day.title()} is not in the Kilat forecast'
+    return None
+
+
+def line_directions(text):
+    """The 8-point compass directions a line names, as N, NE, ..., NW."""
+    found = set(DIRECTION_ABBR_RE.findall(text))
+    for match in DIRECTION_WORD_RE.finditer(text):
+        stem = ((match.group(1) or '') + (match.group(2) or '')).lower()
+        if stem:
+            found.add(DIRECTION_STEMS[stem])
+    return found
+
+
+def story_directions(digest_text):
+    """Directions of the wind-story line for now and the next 24 h, or None when the digest has no such line."""
+    for line in section(digest_text, 'W').splitlines():
+        if 'GFS 925 hPa' in line:
+            found = set()
+            for part in re.findall(r'(?:Now|Next 24 h): ([^.]*)\.', line):
+                found |= set(re.findall(r'from (NE|NW|SE|SW|N|E|S|W)\b', part))
+            return found
+    return None
+
+
+def wind_problem(line, digest_text):
+    if not WIND_WORD_RE.search(line):
+        return None
+    allowed = story_directions(digest_text)
+    if allowed is None:
+        return 'wind clause without a wind story'
+    named = line_directions(line)
+    if named and not named <= allowed:
+        return 'wind direction not in the wind story'
     return None
 
 
@@ -175,6 +220,8 @@ def validate(text, stop_reason, digest_text):
     if not re.fullmatch(r'S[0-9]+', lead_id) or f'[{lead_id}]' not in digest_text:
         reasons.append(f'lead {lead!r} is not an S-id in the digest')
     joined = ' '.join(prose)
+    if SELF_RE.search(joined + ' ' + str(card.get('headline', ''))):
+        reasons.append('names Kilat in the third person')
     kilat = section(digest_text, 'K')
     if kilat and 'EXPIRED' not in kilat and 'unavailable' not in kilat:
         evidence = card.get('evidence') if isinstance(card.get('evidence'), dict) else {}

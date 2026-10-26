@@ -410,8 +410,135 @@ def hotspots(raw, ctx):
     return lines or [('Hotspot data: unavailable in this snapshot.', None)]
 
 
+COMPASS8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+CALM_MS = 2.0  # below this the 925 hPa wind counts as light and variable
+SHIFT_MIN_RUN = 2  # a new direction must hold for this many 3-hourly samples to count as a shift
+FIRE_POINT_LABELS = {
+    'Riau (Pekanbaru)': 'Riau', 'Jambi': 'Jambi', 'South Sumatra (Palembang)': 'South Sumatra',
+    'West Kalimantan (Pontianak)': 'West Kalimantan',
+}
+POINTING_WITHIN = 45  # degrees between the wind's heading and the bearing from a fire area to Singapore
+
+
+def wind_label(u, v):
+    """The 8-point direction the wind blows FROM, or 'light' when calm."""
+    if math.hypot(u, v) < CALM_MS:
+        return 'light'
+    toward = (math.degrees(math.atan2(u, v)) + 360) % 360
+    return COMPASS8[round(((toward + 180) % 360) / 45) % 8]
+
+
+def wind_runs(samples):
+    """[(label, first sample time, sample count)], single-sample wobbles folded into their neighbour."""
+    labels = [(s['at'], wind_label(s['u'], s['v'])) for s in samples if 'u' in s]
+    runs = []
+    for at, label in labels:
+        if runs and runs[-1][0] == label:
+            runs[-1][2] += 1
+        else:
+            runs.append([label, at, 1])
+    changed = True
+    while changed and len(runs) > 1:
+        changed = False
+        for i, run in enumerate(runs):
+            if run[2] < SHIFT_MIN_RUN:
+                if i == 0:
+                    runs[1][1], runs[1][2] = run[1], runs[1][2] + run[2]
+                else:
+                    runs[i - 1][2] += run[2]
+                del runs[i]
+                changed = True
+                break
+        merged = []
+        for run in runs:
+            if merged and merged[-1][0] == run[0]:
+                merged[-1][2] += run[2]
+            else:
+                merged.append(run)
+        runs = merged
+    return [tuple(r) for r in runs]
+
+
+def join_names(names):
+    names = list(dict.fromkeys(names))
+    return names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' and ' + names[-1]
+
+
+def wind_name(label):
+    return 'light and variable' if label == 'light' else f'from {label}'
+
+
+def clock_word(at, now):
+    local = t(at).astimezone(SGT)
+    day = {-1: 'yesterday', 0: 'today', 1: 'tomorrow'}.get((local.date() - now.astimezone(SGT).date()).days, local.strftime('%a'))
+    return f"{local:%H:%M} {day}"
+
+
+def run_story(runs, now, past):
+    """'from NW until 08:00 today, from SW since' for the past; 'from SW until 20:00 tomorrow, then from NW' ahead."""
+    runs = runs[-3:] if past else runs[:3]
+    if len(runs) == 1:
+        return f"{wind_name(runs[0][0])} {'the whole time' if past else 'for the whole period'}"
+    parts = []
+    for i, (label, _, _) in enumerate(runs[:-1]):
+        parts.append(f"{wind_name(label)} until {clock_word(runs[i + 1][1], now)}")
+    if past:
+        parts.append(f"{wind_name(runs[-1][0])} since")
+    else:
+        parts.append(f"then {wind_name(runs[-1][0])}")
+    return ', '.join(parts)
+
+
+def wind_story(raw, ctx):
+    """The one line that tells how the 925 hPa (about 750 m) wind has turned and where it points next.
+    Worked out here so the model never has to read wind components; None when the source is missing."""
+    g = raw.get('gfs_transport')
+    now = ctx['now']
+    sg = ((g or {}).get('points') or {}).get('Singapore')
+    if not sg:
+        return None
+    usable = [s for s in sg['samples'] if 'u' in s]
+    past = [s for s in usable if t(s['at']) <= now]
+    ahead = [s for s in usable if t(s['at']) > now]
+    if len(past) < 2 or len(ahead) < 2:
+        return None
+    # Runs are found over the whole series so a turn that straddles "now" counts as one shift, then split at now.
+    runs = wind_runs(past + ahead)
+    first_ahead = t(ahead[0]['at'])
+    last_past = t(past[-1]['at'])
+    starts = [t(r[1]) for r in runs]
+    now_index = max(i for i, at in enumerate(starts) if at <= last_past)
+    ahead_index = max(i for i, at in enumerate(starts) if at <= first_ahead)
+    past_runs, ahead_runs = runs[:now_index + 1], runs[ahead_index:]
+    text = ("Wind over Singapore at about 750 m (NOAA GFS 925 hPa; a model, not a measurement, and the level smoke "
+            f"travels on). Past 24 h: {run_story(past_runs, now, True)}. Now: {wind_name(past_runs[-1][0])}. "
+            f"Next 24 h: {run_story(ahead_runs, now, False)}")
+    groups = ctx.get('hotspot_groups', {})
+    names = [n for area_name in groups for n in WIND_FOR_AREA.get(area_name, [])] or list(FIRE_POINT_LABELS)
+    pointing, not_pointing = [], []
+    for name in dict.fromkeys(names):
+        point = g['points'].get(name)
+        if not point or name not in FIRE_POINT_LABELS:
+            continue
+        rows = [s for s in point['samples'] if 'u' in s and t(s['at']) > now]
+        if not rows:
+            continue
+        heading = [angle_gap((math.degrees(math.atan2(s['u'], s['v'])) + 360) % 360,
+                             bearing((point['lat'], point['lon']), SG)) <= POINTING_WITHIN
+                   and math.hypot(s['u'], s['v']) >= CALM_MS for s in rows]
+        (pointing if sum(heading) * 2 >= len(heading) else not_pointing).append(FIRE_POINT_LABELS[name])
+    if pointing:
+        text += f", pointing from the {join_names(pointing)} fire areas toward Singapore"
+    elif not_pointing:
+        text += f", not pointing from the {join_names(not_pointing)} fire areas toward Singapore"
+    return text + '.'
+
+
 def wind(raw, ctx):
     lines, now = [], ctx['now']
+    story = wind_story(raw, ctx)
+    if story:
+        lines.append((story, None))
     sp, di = raw.get('wind_speed'), raw.get('wind_direction')
     if sp and di:
         s_read, d_read = sp['data']['readings'][0], di['data']['readings'][0]

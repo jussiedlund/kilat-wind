@@ -1,1 +1,2 @@
 anthropic>=1.12,<2
+eccodes==2.49.0
